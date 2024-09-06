@@ -1,106 +1,88 @@
 #!/bin/bash
 
-# Función para mostrar el menú de ayuda
+# Function to display help menu
 show_help() {
-    echo "Uso: $0 [directorio] [opciones]"
+    echo "Usage: $0 [directory] [options]"
     echo
-    echo "Descripción:"
-    echo "  Este script procesa archivos de texto en un directorio, concatenándolos en un único archivo"
-    echo "  o copiándolos al portapapeles. Respeta los archivos de ignorar (como .gitignore) y ofrece"
-    echo "  opciones para personalizar el comportamiento."
+    echo "Description:"
+    echo "  This script processes tracked files in a Git repository, concatenating their contents"
+    echo "  into a single file or copying them to the clipboard. It respects .gitignore and offers"
+    echo "  options to customize behavior."
     echo
-    echo "Opciones:"
-    echo "  -h, --help          Muestra este mensaje de ayuda"
-    echo "  --clipboard         Copia el resultado al portapapeles en lugar de crear un archivo"
-    echo "  --ignore <rutas>    Rutas adicionales a ignorar (separadas por espacios)"
-    echo "  --force <rutas>     Rutas a incluir forzosamente (separadas por espacios)"
-    echo "  --output <archivo>  Especifica un archivo de salida personalizado (por defecto: files.txt)"
+    echo "Options:"
+    echo "  -h, --help                       Show this help message"
+    echo "  --clipboard                      Copy the result to clipboard instead of creating a file"
+    echo "  --output <file>                  Specify a custom output file (default: files.txt)"
+    echo "  --supported-binary-files <types> Specify additional supported binary file types (e.g., 'CSV|JSON')"
     echo
-    echo "Ejemplos:"
-    echo "  $0 /ruta/del/proyecto"
-    echo "  $0 . --clipboard --ignore node_modules --force src/important.js"
-    echo "  $0 /ruta/del/proyecto --output resultado.md"
+    echo "Examples:"
+    echo "  $0 /path/to/project"
+    echo "  $0 . --clipboard --supported-binary-files 'CSV|JSON'"
+    echo "  $0 /path/to/project --output result.txt"
 }
 
-# Configuración inicial
+# Initial configuration
 DIRECTORY="."
 OUTPUT_FILE="files.txt"
 USE_CLIPBOARD=false
-ADDITIONAL_IGNORES=()
-FORCE_INCLUDE=()
+SUPPORTED_BINARY_TYPES=""
 
-# Procesar argumentos
+# Process arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help) show_help; exit 0 ;;
         --clipboard) USE_CLIPBOARD=true; shift ;;
-        --ignore) shift; ADDITIONAL_IGNORES+=("$1"); shift ;;
-        --force) shift; FORCE_INCLUDE+=("$1"); shift ;;
         --output) shift; OUTPUT_FILE="$1"; shift ;;
-        -*) echo "Opción desconocida: $1" >&2; show_help; exit 1 ;;
+        --supported-binary-files) shift; SUPPORTED_BINARY_TYPES="$1"; shift ;;
+        -*) echo "Unknown option: $1" >&2; show_help; exit 1 ;;
         *) DIRECTORY="$1"; shift ;;
     esac
 done
 
-# Función para comprobar si un archivo debe ser ignorado
-should_ignore() {
-    local file="$1"
-    local relative_path="${file#$DIRECTORY/}"
+# Change to the specified directory
+cd "$DIRECTORY" || { echo "Error: Unable to change to directory $DIRECTORY"; exit 1; }
 
-    # Comprobar si el archivo está en la lista de inclusión forzada
-    for force_path in "${FORCE_INCLUDE[@]}"; do
-        if [[ "$relative_path" == "$force_path" || "$relative_path" == "$force_path"/* ]]; then
-            return 1
-        fi
-    done
+# Check if it's a Git repository
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Error: Not a Git repository"
+    exit 1
+fi
 
-    # Comprobar patrones de exclusión
-    if git check-ignore -q "$file" 2>/dev/null; then
-        return 0
-    fi
+# Get the current branch name
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-    # Comprobar ignores adicionales
-    for ignore_path in "${ADDITIONAL_IGNORES[@]}"; do
-        if [[ "$relative_path" == "$ignore_path" || "$relative_path" == "$ignore_path"/* ]]; then
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-# Función para procesar un archivo
+# Function to process a file
 process_file() {
     local file="$1"
-    local relative_path="${file#$DIRECTORY/}"
+    local mime_type=$(file -b --mime-type "$file")
 
-    if should_ignore "$file"; then
-        return
-    fi
+    echo "$file"
+    echo '```'
 
-    # Comprobar si es un archivo de texto
-    if file -b --mime-type "$file" | grep -qE '^text|^application/json|^application/xml|^application/csv'; then
-        echo "$relative_path"
-        echo '```'
+    if [[ $mime_type == text/* || $mime_type == application/json || $mime_type == application/xml ]]; then
         cat "$file"
-        echo '```'
-        echo
+    elif [[ $mime_type == application/* && $SUPPORTED_BINARY_TYPES == *"${file##*.}"* ]]; then
+        cat "$file"
     else
-        echo "$relative_path (archivo binario)"
-        echo
+        echo "(Binary file, content not shown)"
     fi
+
+    echo '```'
+    echo
 }
 
-# Procesar archivos
-output=$(find "$DIRECTORY" -type f | while read -r file; do
-    process_file "$file"
+# Process files
+output=$(git ls-tree -r "$BRANCH" --name-only | while read -r file; do
+    if [ -f "$file" ]; then
+        process_file "$file"
+    fi
 done)
 
-# Manejar la salida
+# Handle output
 if [ "$USE_CLIPBOARD" = true ]; then
     echo "$output" | xclip -selection clipboard
-    echo "El contenido ha sido copiado al portapapeles."
+    echo "Content has been copied to clipboard."
 else
     echo "$output" > "$OUTPUT_FILE"
-    echo "El contenido ha sido guardado en $OUTPUT_FILE"
+    echo "Content has been saved to $OUTPUT_FILE"
 fi
