@@ -79,22 +79,28 @@ should_ignore() {
 # Function to process a file
 process_file() {
     local file="$1"
+    local base_path="$2"
+    local relative_base_path="$3"
+    local relative_path="${file#$base_path/}"
+    relative_path="$relative_base_path/$relative_path"
+    relative_path="${relative_path#./}"  # Remove leading './' if present
     local mime_type=$(file -b --mime-type "$file")
     local extension="${file##*.}"
     extension="${extension,,}"  # Convert to lowercase
 
-    if should_ignore "$file"; then
+    if should_ignore "$relative_path"; then
         return
     fi
 
-    echo "$file"
+    echo "$relative_path"
     echo '```'
 
     if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
+        echo "$relative_path"
         cat "$file"
     else
         echo "(Binary file, content not shown)"
-        echo "$file" >> unprocessed.log
+        echo "$relative_path" >> unprocessed.log
     fi
 
     echo '```'
@@ -104,6 +110,7 @@ process_file() {
 # Function to process a directory or file
 process_path() {
     local path="$1"
+    local original_path="$(pwd)"
 
     if [ ! -e "$path" ]; then
         echo "Error: $path does not exist"
@@ -112,6 +119,7 @@ process_path() {
 
     if [ -d "$path" ]; then
         cd "$path" || return
+        local base_path="$(pwd)"
 
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             if [ -f ".gitignore" ]; then
@@ -124,26 +132,37 @@ process_path() {
                     read -p "Are you sure you want to continue? (y/n): " continue_processing
                     if [[ ! $continue_processing =~ ^[Yy]$ ]]; then
                         echo "Skipping $path"
-                        cd - > /dev/null
+                        cd "$original_path"
                         return
                     fi
                 fi
             fi
         fi
 
+        local relative_base_path="${base_path#$original_path/}"
+        if [ "$relative_base_path" = "$base_path" ]; then
+            relative_base_path="."
+        fi
+
         if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             git ls-tree -r HEAD --name-only | while read -r file; do
-                process_file "$file"
+                process_file "$file" "$base_path" "$relative_base_path"
             done
         else
             find . -type f | while read -r file; do
-                process_file "$file"
+                process_file "$file" "$base_path" "$relative_base_path"
             done
         fi
 
-        cd - > /dev/null
+        cd "$original_path"
     elif [ -f "$path" ]; then
-        process_file "$path"
+        local base_path="$(dirname "$(realpath "$path")")"
+        local relative_base_path="${base_path#$original_path/}"
+        if [ "$relative_base_path" = "$base_path" ]; then
+            relative_base_path="."
+        fi
+        local relative_file="${path#$original_path/}"
+        process_file "$path" "$base_path" "$relative_base_path"
     fi
 }
 
