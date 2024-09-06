@@ -14,12 +14,13 @@ show_help() {
     echo "  --clipboard                      Copy the result to clipboard instead of creating a file"
     echo "  --output <file>                  Specify a custom output file (default: files.txt)"
     echo "  --supported-binary-files <types> Specify additional supported binary file types (e.g., 'CSV|JSON')"
-    echo "  --force-ignore <paths>           Specify additional paths to ignore (space-separated)"
+    echo "  --ignore <paths>                 Specify additional paths to ignore (space-separated)"
+    echo "  --force <paths>                  Force inclusion of specified paths (even if ignored)"
     echo
     echo "Examples:"
-    echo "  $0 /path/to/project1 /path/to/project2"
-    echo "  $0 . src/file.js --clipboard --supported-binary-files 'CSV|JSON'"
-    echo "  $0 /path/to/project --output result.md --force-ignore 'temp logs'"
+    echo "  archivist /path/to/project1 /path/to/project2"
+    echo "  archivist . src/file.js --clipboard --supported-binary-files 'CSV|JSON'"
+    echo "  archivist /path/to/project --output result.md --ignore 'temp logs' --force 'node_modules dist'"
 }
 
 # Initial configuration
@@ -27,6 +28,7 @@ OUTPUT_FILE="files.txt"
 USE_CLIPBOARD=false
 SUPPORTED_BINARY_TYPES=""
 FORCE_IGNORE=()
+FORCE_INCLUDE=()
 PATHS_TO_PROCESS=()
 
 # Default ignore list (converted to lowercase)
@@ -37,6 +39,30 @@ DEFAULT_IGNORE=(
     "package-lock.json" "yarn.lock" ".gitignore" "readme.md"
 )
 
+# Platform-specific clipboard copy function
+copy_to_clipboard() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if command -v xclip &> /dev/null; then
+            echo "$output" | xclip -selection clipboard
+        else
+            echo "xclip is not installed. Install it with 'sudo apt-get install xclip' or similar."
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "$output" | pbcopy
+    elif [[ "$OSTYPE" == "cygwin" || "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+        echo "$output" | clip
+    else
+        echo "Clipboard copying is not supported on this OS."
+    fi
+}
+
+# Function to provide fallback for realpath if not available
+if ! command -v realpath &>/dev/null; then
+    realpath() {
+        [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+    }
+fi
+
 # Process arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -44,9 +70,15 @@ while [[ "$#" -gt 0 ]]; do
         --clipboard) USE_CLIPBOARD=true; shift ;;
         --output) shift; OUTPUT_FILE="$1"; shift ;;
         --supported-binary-files) shift; SUPPORTED_BINARY_TYPES="${1,,}"; shift ;;
-        --force-ignore) shift; 
+        --ignore) shift;
             while [[ "$#" -gt 0 && "$1" != --* ]]; do
                 FORCE_IGNORE+=("${1,,}")
+                shift
+            done
+            ;;
+        --force) shift;
+            while [[ "$#" -gt 0 && "$1" != --* ]]; do
+                FORCE_INCLUDE+=("${1,,}")
                 shift
             done
             ;;
@@ -55,25 +87,40 @@ while [[ "$#" -gt 0 ]]; do
     esac
 done
 
+# Enable extended pattern matching
+shopt -s globstar
+
 # Function to check if a path should be ignored
 should_ignore() {
     local path="${1,,}"  # Convert to lowercase
 
+    # Normalize path to remove trailing slashes
+    path="${path%/}"
+
+    # Check if path is in force include list (ignore ignore rules)
+    for include in "${FORCE_INCLUDE[@]}"; do
+        include="${include%/}"
+        if [[ "$path" == "$include" || "$path" == "$include"/* ]]; then
+            return 1  # Do not ignore
+        fi
+    done
+
     # Check against default ignore list
     for ignore in "${DEFAULT_IGNORE[@]}"; do
-        if [[ "$path" == $ignore || "$path" == *"/$ignore"* ]]; then
-            return 0
+        if [[ "$path" == "$ignore" || "$path" == *"/$ignore"* ]]; then
+            return 0  # Ignore
         fi
     done
 
     # Check against force ignore list
     for ignore in "${FORCE_IGNORE[@]}"; do
-        if [[ "$path" == $ignore || "$path" == *"/$ignore"* ]]; then
-            return 0
+        ignore="${ignore%/}"
+        if [[ "$path" == "$ignore" || "$path" == "$ignore"/* ]]; then
+            return 0  # Ignore
         fi
     done
 
-    return 1
+    return 1  # Do not ignore
 }
 
 # Function to process a file
@@ -96,7 +143,6 @@ process_file() {
     echo '```'
 
     if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
-        echo "$relative_path"
         cat "$file"
     else
         echo "(Binary file, content not shown)"
@@ -175,7 +221,7 @@ done
 
 # Handle output
 if [ "$USE_CLIPBOARD" = true ]; then
-    echo "$output" | xclip -selection clipboard
+    copy_to_clipboard
     echo "Content has been copied to clipboard."
 else
     echo "$output" > "$OUTPUT_FILE"
