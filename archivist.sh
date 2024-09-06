@@ -29,17 +29,17 @@ SUPPORTED_BINARY_TYPES=""
 FORCE_IGNORE=()
 PATHS_TO_PROCESS=()
 
-# Default ignore list
+# Default ignore list (converted to lowercase)
 DEFAULT_IGNORE=(
-    ".git" ".svn" ".hg" ".DS_Store" "Thumbs.db" "desktop.ini"
+    ".git" ".svn" ".hg" ".ds_store" "thumbs.db" "desktop.ini"
     "node_modules" "dist" "build" "target" "out"
     "*.log" "*.tmp" "*.temp" "*.swp" "*.bak" "*~"
-    "package-lock.json" "yarn.lock" ".gitignore" "README.md"
+    "package-lock.json" "yarn.lock" ".gitignore" "readme.md"
 )
 
 # Arrays to store processed and unprocessed file extensions
-PROCESSED_EXTENSIONS=()
-UNPROCESSED_EXTENSIONS=()
+declare -A PROCESSED_EXTENSIONS
+declare -A UNPROCESSED_EXTENSIONS
 PROCESSED_COUNT=0
 UNPROCESSED_COUNT=0
 
@@ -49,10 +49,10 @@ while [[ "$#" -gt 0 ]]; do
         -h|--help) show_help; exit 0 ;;
         --clipboard) USE_CLIPBOARD=true; shift ;;
         --output) shift; OUTPUT_FILE="$1"; shift ;;
-        --supported-binary-files) shift; SUPPORTED_BINARY_TYPES="$1"; shift ;;
+        --supported-binary-files) shift; SUPPORTED_BINARY_TYPES="${1,,}"; shift ;;
         --force-ignore) shift; 
             while [[ "$#" -gt 0 && "$1" != --* ]]; do
-                FORCE_IGNORE+=("$1")
+                FORCE_IGNORE+=("${1,,}")
                 shift
             done
             ;;
@@ -63,7 +63,7 @@ done
 
 # Function to check if a path should be ignored
 should_ignore() {
-    local path="$1"
+    local path="${1,,}"  # Convert to lowercase
 
     # Check against default ignore list
     for ignore in "${DEFAULT_IGNORE[@]}"; do
@@ -87,6 +87,7 @@ process_file() {
     local file="$1"
     local mime_type=$(file -b --mime-type "$file")
     local extension="${file##*.}"
+    extension="${extension,,}"  # Convert to lowercase
 
     if should_ignore "$file"; then
         return
@@ -97,11 +98,11 @@ process_file() {
 
     if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
         cat "$file"
-        PROCESSED_EXTENSIONS+=("$extension")
+        PROCESSED_EXTENSIONS[$extension]=1
         ((PROCESSED_COUNT++))
     else
         echo "(Binary file, content not shown)"
-        UNPROCESSED_EXTENSIONS+=("$extension")
+        UNPROCESSED_EXTENSIONS[$extension]=1
         ((UNPROCESSED_COUNT++))
         echo "$file" >> unprocessed.log
     fi
@@ -174,8 +175,9 @@ fi
 
 # Print summary
 echo "Summary:"
-echo "Processed files: $PROCESSED_COUNT"
-echo "Processed extensions: $(echo "${PROCESSED_EXTENSIONS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
-echo "Unprocessed files: $UNPROCESSED_COUNT"
-echo "Unprocessed extensions: $(echo "${UNPROCESSED_EXTENSIONS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
-echo "List of unprocessed files saved to unprocessed.log"
+echo "- Paths processed: ${PATHS_TO_PROCESS[*]}"
+echo "- Processed files: $PROCESSED_COUNT"
+echo "- Processed extensions: ${!PROCESSED_EXTENSIONS[*]}"
+echo "- Unprocessed files: $UNPROCESSED_COUNT"
+echo "- Unprocessed extensions: ${!UNPROCESSED_EXTENSIONS[*]}"
+echo "List of unprocessed files saved to unprocessed.log file"
