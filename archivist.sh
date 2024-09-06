@@ -37,12 +37,6 @@ DEFAULT_IGNORE=(
     "package-lock.json" "yarn.lock" ".gitignore" "readme.md"
 )
 
-# Arrays to store processed and unprocessed file extensions
-declare -A PROCESSED_EXTENSIONS
-declare -A UNPROCESSED_EXTENSIONS
-PROCESSED_COUNT=0
-UNPROCESSED_COUNT=0
-
 # Process arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -98,12 +92,8 @@ process_file() {
 
     if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
         cat "$file"
-        PROCESSED_EXTENSIONS[$extension]=1
-        ((PROCESSED_COUNT++))
     else
         echo "(Binary file, content not shown)"
-        UNPROCESSED_EXTENSIONS[$extension]=1
-        ((UNPROCESSED_COUNT++))
         echo "$file" >> unprocessed.log
     fi
 
@@ -175,9 +165,5 @@ fi
 
 # Print summary
 echo "Summary:"
-echo "- Paths processed: ${PATHS_TO_PROCESS[*]}"
-echo "- Processed files: $PROCESSED_COUNT"
-echo "- Processed extensions: ${!PROCESSED_EXTENSIONS[*]}"
-echo "- Unprocessed files: $UNPROCESSED_COUNT"
-echo "- Unprocessed extensions: ${!UNPROCESSED_EXTENSIONS[*]}"
+echo "Paths processed: ${PATHS_TO_PROCESS[*]}"
 echo "List of unprocessed files saved to unprocessed.log file"
