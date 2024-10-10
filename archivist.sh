@@ -16,11 +16,13 @@ show_help() {
     echo "  --supported-binary-files <types> Specify additional supported binary file types (e.g., 'CSV|JSON')"
     echo "  --ignore <paths>                 Specify additional paths to ignore (space-separated)"
     echo "  --force <paths>                  Force inclusion of specified paths (even if ignored)"
+    echo "  --only-list                      Only list file paths without their content"
     echo
     echo "Examples:"
     echo "  archivist /path/to/project1 /path/to/project2"
     echo "  archivist . src/file.js --clipboard --supported-binary-files 'CSV|JSON'"
     echo "  archivist /path/to/project --output result.md --ignore 'temp logs' --force 'node_modules dist'"
+    echo "  archivist . --only-list --output file_list.txt"
 }
 
 # Initial configuration
@@ -30,6 +32,7 @@ SUPPORTED_BINARY_TYPES=""
 FORCE_IGNORE=()
 FORCE_INCLUDE=()
 PATHS_TO_PROCESS=()
+ONLY_LIST=false
 
 # Default ignore list (converted to lowercase)
 DEFAULT_IGNORE=(
@@ -82,6 +85,7 @@ while [[ "$#" -gt 0 ]]; do
                 shift
             done
             ;;
+        --only-list) ONLY_LIST=true; shift ;;
         -*) echo "Unknown option: $1" >&2; show_help; exit 1 ;;
         *) PATHS_TO_PROCESS+=("$1"); shift ;;
     esac
@@ -131,26 +135,31 @@ process_file() {
     local relative_path="${file#$base_path/}"
     relative_path="$relative_base_path/$relative_path"
     relative_path="${relative_path#./}"  # Remove leading './' if present
-    local mime_type=$(file -b --mime-type "$file")
-    local extension="${file##*.}"
-    extension="${extension,,}"  # Convert to lowercase
 
     if should_ignore "$relative_path"; then
         return
     fi
 
-    echo "$relative_path"
-    echo '```'
-
-    if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
-        cat "$file"
+    if [ "$ONLY_LIST" = true ]; then
+        echo "$relative_path"
     else
-        echo "(Binary file, content not shown)"
-        echo "$relative_path" >> unprocessed.log
-    fi
+        echo "$relative_path"
+        echo '```'
 
-    echo '```'
-    echo
+        local mime_type=$(file -b --mime-type "$file")
+        local extension="${file##*.}"
+        extension="${extension,,}"  # Convert to lowercase
+
+        if [[ $mime_type == text/* || $extension =~ ^(ts|js|html|css|sass|scss|tsx|jsx|java|scala|vue|sql|json)$ || $SUPPORTED_BINARY_TYPES == *"$extension"* ]]; then
+            cat "$file"
+        else
+            echo "(Binary file, content not shown)"
+            echo "$relative_path" >> unprocessed.log
+        fi
+
+        echo '```'
+        echo
+    fi
 }
 
 # Function to process a directory or file
@@ -215,20 +224,24 @@ process_path() {
 # Main processing
 output=""
 > unprocessed.log  # Clear the unprocessed.log file
-for path in "${PATHS_TO_PROCESS[@]}"; do
-    output+="$(process_path "$path")"
-done
-
-# Handle output
 if [ "$USE_CLIPBOARD" = true ]; then
+    # Collect output into a variable while preserving newlines
+    output=$(for path in "${PATHS_TO_PROCESS[@]}"; do
+        process_path "$path"
+    done)
     copy_to_clipboard
     echo "Content has been copied to clipboard."
 else
-    echo "$output" > "$OUTPUT_FILE"
+    # Directly write output to the file
+    for path in "${PATHS_TO_PROCESS[@]}"; do
+        process_path "$path"
+    done > "$OUTPUT_FILE"
     echo "Content has been saved to $OUTPUT_FILE"
 fi
 
 # Print summary
 echo "Summary:"
 echo "Paths processed: ${PATHS_TO_PROCESS[*]}"
-echo "List of unprocessed files saved to unprocessed.log file"
+if [ "$ONLY_LIST" = false ]; then
+    echo "List of unprocessed files saved to unprocessed.log file"
+fi
